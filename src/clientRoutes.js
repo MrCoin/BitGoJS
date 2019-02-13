@@ -12,6 +12,8 @@ const debug = require('debug')('bitgo:express');
 const util = require('./util');
 const errors = require('./errors');
 
+const { convertCashAddrToLegacy } = require('./mrcoin');
+
 const BITGOEXPRESS_USER_AGENT = 'BitGoExpress/' + pjson.version;
 
 const handlePing = function(req) {
@@ -251,6 +253,16 @@ const handleCanonicalAddress = function(req) {
   return coin.canonicalAddress(address, version || fallbackVersion);
 };
 
+// v2 BCH address conversion for get wallet address before the request gets
+// proxied.
+const handleV2GetWalletAddress = function(req, res, next) {
+  const newAddress = convertCashAddrToLegacy(req.params.coin, req.params.addressOrId);
+  // There is also req.path and req.params, but req.url alone seem to do the trick.
+  req.url = req.url.replace(req.params.addressOrId, newAddress);
+
+  next();
+};
+
 // handle new wallet creation
 const handleV2GenerateWallet = function(req) {
   const bitgo = req.bitgo;
@@ -360,6 +372,7 @@ const handleV2SendOne = function(req) {
   return coin.wallets().get({ id: req.params.id, reqId })
   .then(function(wallet) {
     req.body.reqId = reqId;
+    req.body.address = convertCashAddrToLegacy(req.params.coin, req.body.address);
     return wallet.send(req.body);
   })
   .catch(function(err) {
@@ -579,6 +592,8 @@ exports = module.exports = function(app, args) {
   app.use('/api/v[1]/*', parseBody, prepareBitGo(args), promiseWrapper(handleREST, args));
 
   // API v2
+
+  app.get('/api/v2/:coin/wallet/:walletId/address/:addressOrId', handleV2GetWalletAddress);
 
   // create keychain
   app.post('/api/v2/:coin/keychain/local', parseBody, prepareBitGo(args), promiseWrapper(handleV2CreateLocalKeyChain, args));
